@@ -14,10 +14,17 @@ import time
 import statistics as _stats
 from typing import Iterable, Iterator, Union, Callable, Any
 
+from dive_core import DiveCore
+from dive_stats import DiveStats
+from dive_predict import DivePredict
+from dive_viz import DiveViz
+from dive_export import DiveExport
+from dive_transforms import DiveTransforms
+
 Numeric = Union[int, float]
 
 
-class Dive:
+class Dive(DiveCore, DiveStats, DivePredict, DiveViz, DiveExport, DiveTransforms):
     """Ordered numeric container with built-in statistics and visualisation.
 
     Examples
@@ -38,16 +45,7 @@ class Dive:
     >>> sales.predict_next(reference=temps, TA=1)  # predicts sales for temp=35
     """
 
-    __slots__ = ("_data",)
-
-    # ================================================================== #
-    #  Construction & Data Management                                     #
-    # ================================================================== #
-
-    def __init__(self, data: Iterable[Numeric] | Numeric | None = None) -> None:
-        self._data: list[float] = []
-        if data is not None:
-            self.add(data)
+    __slots__ = ()
 
     def add(self, *values: Numeric | Iterable[Numeric]) -> Dive:
         """Append one or more values (or iterables of values).

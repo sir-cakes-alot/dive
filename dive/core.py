@@ -7,10 +7,16 @@ from __future__ import annotations
 import math
 from typing import Iterable, Iterator, Union, Any
 
+from .stats import DiveStats
+from .viz import DiveViz
+from .transforms import DiveTransforms
+from .predict import DivePredict
+from .export import DiveExport
+
 Numeric = Union[int, float]
 
 
-class DiveCore:
+class Dive(DiveStats, DiveViz, DiveTransforms, DivePredict, DiveExport):
     """Core Dive class with data management and basic operations."""
 
     __slots__ = ("_data",)
@@ -20,7 +26,7 @@ class DiveCore:
         if data is not None:
             self.add(data)
 
-    def add(self, *values: Numeric | Iterable[Numeric]) -> DiveCore:
+    def add(self, *values: Numeric | Iterable[Numeric]) -> Dive:
         """Append one or more values (or iterables of values).
 
         Returns *self* so calls can be chained.
@@ -37,7 +43,7 @@ class DiveCore:
 
     append = add
 
-    def remove(self, value: Numeric) -> DiveCore:
+    def remove(self, value: Numeric) -> Dive:
         """Remove the first occurrence of *value*."""
         self._data.remove(float(value))
         return self
@@ -46,14 +52,14 @@ class DiveCore:
         """Remove and return the item at *index* (default last)."""
         return self._data.pop(index)
 
-    def clear(self) -> DiveCore:
+    def clear(self) -> Dive:
         """Remove all data points."""
         self._data.clear()
         return self
 
-    def copy(self) -> DiveCore:
+    def copy(self) -> Dive:
         """Return a shallow copy."""
-        clone = DiveCore()
+        clone = Dive()
         clone._data = list(self._data)
         return clone
 
@@ -84,9 +90,9 @@ class DiveCore:
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, index: int | slice) -> float | DiveCore:
+    def __getitem__(self, index: int | slice) -> float | Dive:
         result = self._data[index]
-        return DiveCore(result) if isinstance(index, slice) else result
+        return Dive(result) if isinstance(index, slice) else result
 
     def __setitem__(self, index: int, value: Numeric) -> None:
         self._data[index] = float(value)
@@ -104,16 +110,16 @@ class DiveCore:
         return len(self._data) > 0
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, DiveCore):
+        if isinstance(other, Dive):
             return self._data == other._data
         return NotImplemented
 
-    def __iadd__(self, other: Numeric | Iterable[Numeric]) -> DiveCore:
+    def __iadd__(self, other: Numeric | Iterable[Numeric]) -> Dive:
         return self.add(other)
 
-    def __add__(self, other: DiveCore | Iterable[Numeric]) -> DiveCore:
+    def __add__(self, other: Dive | Iterable[Numeric]) -> Dive:
         clone = self.copy()
-        clone.add(other._data if isinstance(other, DiveCore) else other)
+        clone.add(other._data if isinstance(other, Dive) else other)
         return clone
 
     def _require(self, n: int = 1) -> None:

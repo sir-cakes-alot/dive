@@ -49,8 +49,8 @@ class DiveTransforms:
         result = list(self._data)
         for _ in range(periods):
             result = [result[i + 1] - result[i] for i in range(len(result) - 1)]
-        from dive_core import DiveCore
-        return DiveCore(result)
+        from .core import Dive
+        return Dive(result)
 
     def pct_change(self) -> list[float]:
         """Percentage change from previous value."""
@@ -72,13 +72,13 @@ class DiveTransforms:
             if hi is not None and x > hi:
                 x = hi
             result.append(x)
-        from dive_core import DiveCore
-        return DiveCore(result)
+        from .core import Dive
+        return Dive(result)
 
     def apply(self, func: Callable[[float], float]) -> 'DiveTransforms':
         """Apply a function to each element."""
-        from dive_core import DiveCore
-        return DiveCore([func(x) for x in self._data])
+        from .core import Dive
+        return Dive([func(x) for x in self._data])
 
     def outliers(self, method: str = "iqr", k: float = 1.5) -> list[float]:
         if method == "iqr":

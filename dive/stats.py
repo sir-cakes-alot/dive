@@ -28,8 +28,8 @@ class DiveStats:
             if any(x <= 0 for x in self._data):
                 raise ValueError("Geometric mean requires all strictly positive values.")
         else:
-            from dive_core import DiveCore
-            temp_dive = DiveCore([i if i > 0 else 0.0001 for i in self._data])
+            from .core import Dive
+            temp_dive = Dive([i if i > 0 else 0.0001 for i in self._data])
             return temp_dive.geo_mean()
         return math.exp(
             math.fsum(math.log(x) for x in self._data) / len(self._data)
@@ -41,8 +41,8 @@ class DiveStats:
             if any(x <= 0 for x in self._data):
                 raise ValueError("Harmonic mean requires all strictly positive values.")
         else:
-            from dive_core import DiveCore
-            temp_dive = DiveCore([i if i > 0 else 0.0001 for i in self._data])
+            from .core import Dive
+            temp_dive = Dive([i if i > 0 else 0.0001 for i in self._data])
             return temp_dive.harmonic_mean()
         return _stats.harmonic_mean(self._data)
 

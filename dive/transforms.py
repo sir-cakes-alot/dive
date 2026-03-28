@@ -7,7 +7,10 @@ import statistics as _stats
 from typing import Callable
 
 
-class DiveTransforms:
+from .stats import DiveStats
+
+
+class DiveTransforms(DiveStats):
     """Data transformation methods for Dive."""
 
     def z_scores(self) -> list[float]:

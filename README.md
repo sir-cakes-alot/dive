@@ -1,20 +1,17 @@
-# dive-for-data
-DIVE — Data Insights & Visualization Engine
+# DIVE — Data Insight and Visualization Engine
 
 `dive-for-data` provides `Dive`, a small pure-Python container for ordered numeric data with:
-- **statistical summaries** (`mean`, `median`, `mode`, `stdev`, `variance`, `skewness`, `kurtosis`, etc.)
-- **quantiles and histograms** (`percentile`, `quartiles`, `iqr`)
-- **data transforms** (`z_scores`, `normalized`, `cumulative_sum`, `moving_average`, `diff`, `pct_change`, `sorted`, `clip`, `apply`)
-- **prediction engine** (`predict_next`, `predict_detail`, `linear`, `quadratic`, `holt`, `exponential`, `drift`, `newton`, `lagrange`, `seasonal`, `ensemble`)
-- **regression/correlation analysis** (`correlation`, `covariance`, `regress_on`)
+- **Statistical summaries** (`mean`, `median`, `mode`, `stdev`, `variance`, `skewness`, `kurtosis`, etc.)
+- **Quantiles and histograms** (`percentile`, `quartiles`, `iqr`)
+- **Data transforms** (`z_scores`, `normalized`, `cumulative_sum`, `moving_average`, `diff`, `pct_change`, `sorted`, `clip`, `apply`)
+- **Prediction engine** (`predict_next`, `predict_detail`, `linear`, `quadratic`, `holt`, `exponential`, `drift`, `newton`, `lagrange`, `seasonal`, `ensemble`)
+- **Regression/Correlation analysis** (`correlation`, `covariance`, `regress_on`)
 - **ASCII visualizations** (`histogram`, `sparkline`, `plot_ascii`)
-- **utility exports** (`to_list`, `to_dict`)
+- **Utility exports** (`to_list`, `to_dict`)
 
 ---
 
 ## Installation
-
-Install directly from PyPI:
 
 ```bash
 pip install dive-for-data
@@ -25,24 +22,26 @@ pip install dive-for-data
 ```python
 from dive import Dive
 
-# create dataset
+# Create dataset
 sales = Dive([100, 150, 120, 200, 180])
 print(sales.mean())          # 150.0
 print(sales.summary())
 
-# add new value
+# Add new value
 sales += 220
 print(sales[-1])            # 220.0
 
-# predict next value (ensemble model)
+# Predict next value (ensemble model)
 print(sales.predict_next())
 
-# use reference series for regression mode (len(reference)==len(self)+steps)
+# Use reference series for regression mode (len(reference) == len(self) + steps)
+# This learns the relationship F(temps) -> sales
 temps = Dive([20, 25, 22, 30, 28, 35])
 print(sales.predict_next(reference=temps, TA=1))
 
-# detailed prediction report
-print(sales.predict_detail(steps=3, reference=temps, TA=1))
+# Detailed prediction report
+report = sales.predict_detail(steps=3, reference=temps, TA=1)
+print(report["ensemble"])
 ``` 
 
 ## API overview

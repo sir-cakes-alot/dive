@@ -2,7 +2,10 @@
 DIVE Visualization — Summary and plotting methods.
 """
 
-class DiveViz:
+from .stats import DiveStats
+
+
+class DiveViz(DiveStats):
     """Visualization methods for Dive."""
 
     def summary(self) -> str:

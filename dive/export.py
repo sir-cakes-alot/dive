@@ -2,7 +2,10 @@
 DIVE Export — Data export methods.
 """
 
-class DiveExport:
+from .stats import DiveStats
+
+
+class DiveExport(DiveStats):
     """Export methods for Dive."""
 
     def to_list(self) -> list[float]:

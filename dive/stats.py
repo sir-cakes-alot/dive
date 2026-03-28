@@ -7,7 +7,10 @@ import statistics as _stats
 from typing import Any
 
 
-class DiveStats:
+from .base import DiveBase
+
+
+class DiveStats(DiveBase):
     """Statistical methods for Dive."""
 
     def mean(self) -> float:
@@ -24,27 +27,30 @@ class DiveStats:
 
     def geo_mean(self, filter_bad: bool = False) -> float:
         self._require()
-        if not filter_bad:
-            if any(x <= 0 for x in self._data):
-                raise ValueError("Geometric mean requires all strictly positive values.")
+        data = self._data
+        if filter_bad:
+            data = [x for x in data if x > 0]
+            if not data:
+                raise ValueError("No positive values found in dataset after filtering.")
         else:
-            from .core import Dive
-            temp_dive = Dive([i if i > 0 else 0.0001 for i in self._data])
-            return temp_dive.geo_mean()
+            if any(x <= 0 for x in data):
+                raise ValueError("Geometric mean requires all strictly positive values.")
+        
         return math.exp(
-            math.fsum(math.log(x) for x in self._data) / len(self._data)
+            math.fsum(math.log(x) for x in data) / len(data)
         )
 
     def harmonic_mean(self, filter_bad: bool = False) -> float:
         self._require()
-        if not filter_bad:
-            if any(x <= 0 for x in self._data):
-                raise ValueError("Harmonic mean requires all strictly positive values.")
+        data = self._data
+        if filter_bad:
+            data = [x for x in data if x > 0]
+            if not data:
+                raise ValueError("No positive values found in dataset after filtering.")
         else:
-            from .core import Dive
-            temp_dive = Dive([i if i > 0 else 0.0001 for i in self._data])
-            return temp_dive.harmonic_mean()
-        return _stats.harmonic_mean(self._data)
+            if any(x <= 0 for x in data):
+                raise ValueError("Harmonic mean requires all strictly positive values.")
+        return _stats.harmonic_mean(data)
 
     def stdev(self, population: bool = False) -> float:
         self._require(1 if population else 2)

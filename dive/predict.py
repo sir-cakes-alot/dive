@@ -7,7 +7,10 @@ import time
 from typing import Any, Callable
 
 
-class DivePredict:
+from .transforms import DiveTransforms
+
+
+class DivePredict(DiveTransforms):
     """Prediction methods for Dive."""
 
     # Time-Series Pattern Detection
@@ -182,8 +185,6 @@ class DivePredict:
                 xj = start + j
                 denom *= (xi - xj)
                 term *= (index - xj)
-            if abs(denom) < 1e-12:
-                return self._round_if_close(self._bound_prediction(self._predict_linear(index)))
             result += term / denom
 
         bounded = self._bound_prediction(self._round_if_close(result))
@@ -894,12 +895,6 @@ class DivePredict:
 
         validated.sort(key=lambda t: t[2])
 
-        # Phase 3: Higher precision if time remains (15% of time)
-        if time.time() < deadline and TA >= 3:
-            for func, _, _, desc in validated[:3]:
-                # Try higher precision fit
-                pass  # Simplified
-
         # Phase 4: Generate predictions
         if not validated:
             return self._predict_correlation_fallback(reference, steps)
@@ -1112,7 +1107,7 @@ class DivePredict:
         Examples
         --------
         >>> sales = Dive([100, 150, 120, 200, 180])
-        >>> temps = Dive([20, 25, 22, 30, 28, 35])  # 35 is tomorrow's temp
+        >>> temps = Dive([20, 25, 22, 30, 28, 35])  # reference has steps=1 extra values
         >>> sales.predict_next(reference=temps, TA=1)
         220.5  # predicted sales for temperature 35
         """

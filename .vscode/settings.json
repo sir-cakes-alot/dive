@@ -1,6 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
-        "/^python main\\.py$/": {
+        "/^python test_dive\\.py$/": {
             "approve": true,
             "matchCommandLine": true
         }

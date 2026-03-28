@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dive-for-data"
 version = "0.1.0"
-description = "Data Insight and Visualization Engine"
+description = "DIVE — Data Insight and Visualization Engine"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "GPL-3.0-only"}
 authors = [
-    {name = "argon2019pleaseplease", email = "pleasework413@gmail.com"}
+    {name = "Blake J.P.", email = "pleasework413@gmail.com"}
 ]
 keywords = ["data", "statistics", "visualization", "prediction"]
 classifiers = [

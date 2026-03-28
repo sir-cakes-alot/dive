@@ -143,21 +143,64 @@ class DivePredict:
 
     # Time-Series Prediction Models
 
+    def _is_finite_value(self, value: float) -> bool:
+        return isinstance(value, (float, int)) and not (math.isnan(value) or math.isinf(value))
+
+    def _bound_prediction(self, value: float) -> float:
+        if not self._is_finite_value(value):
+            raise ValueError("Non-finite prediction")
+        if not self._data:
+            return value
+        last_val = self._data[-1]
+        stdev_val = self.stdev(population=True) if len(self._data) > 1 else 0.0
+        max_delta = max(abs(last_val) * 10.0, stdev_val * 20.0, 1.0)
+        if value > last_val + max_delta:
+            return last_val + max_delta
+        if value < last_val - max_delta:
+            return last_val - max_delta
+        return value
+
     def _predict_lagrange(self, index: float) -> float:
         n = len(self._data)
+        if n == 0:
+            return 0.0
+        if n == 1:
+            return self._data[0]
+
+        window = min(n, 8)
+        start = n - window
+        window_data = self._data[start:]
+
         result = 0.0
-        for i in range(n):
-            term = self._data[i]
-            for j in range(n):
-                if i != j:
-                    term *= (index - j) / (i - j)
-            result += term
-        return self._round_if_close(result)
+        for i in range(window):
+            xi = start + i
+            term = window_data[i]
+            denom = 1.0
+            for j in range(window):
+                if i == j:
+                    continue
+                xj = start + j
+                denom *= (xi - xj)
+                term *= (index - xj)
+            if abs(denom) < 1e-12:
+                return self._round_if_close(self._bound_prediction(self._predict_linear(index)))
+            result += term / denom
+
+        bounded = self._bound_prediction(self._round_if_close(result))
+        return self._round_if_close(bounded)
 
     def _predict_newton(self, steps: int = 1) -> list[float]:
         n = len(self._data)
-        table: list[list[float]] = [list(self._data)]
-        for k in range(1, n):
+        if n == 0:
+            return [0.0] * steps
+        if n == 1:
+            return [self._data[0]] * steps
+
+        window = min(n, 8)
+        base = self._data[-window:]
+
+        table: list[list[float]] = [list(base)]
+        for k in range(1, window):
             prev = table[-1]
             row = [prev[i + 1] - prev[i] for i in range(len(prev) - 1)]
             if not row:
@@ -173,14 +216,19 @@ class DivePredict:
         effective_order = len(tails) - 1
         while effective_order > 0 and self._is_nearly_zero(tails[effective_order]):
             effective_order -= 1
-        keep = max(effective_order + 1, min(2, len(tails)))
+
+        max_keep = min(4, len(tails))
+        keep = max(2, min(effective_order + 1, max_keep))
         tails = tails[:keep]
 
         results = []
         for _ in range(steps):
             for i in range(len(tails) - 2, -1, -1):
                 tails[i] = tails[i] + tails[i + 1]
-            results.append(self._round_if_close(tails[0]))
+            candidate = self._round_if_close(tails[0])
+            candidate = self._bound_prediction(candidate)
+            results.append(self._round_if_close(candidate))
+
         return results
 
     def linear_regression(self) -> tuple[float, float]:
@@ -458,7 +506,8 @@ class DivePredict:
     @staticmethod
     def _inverse_weights(maes: dict[str, float]) -> dict[str, float]:
         eps = 1e-15
-        finite = {m: v for m, v in maes.items() if v < float("inf")}
+        max_reasonable_mae = 1e8
+        finite = {m: v for m, v in maes.items() if v < float("inf") and v <= max_reasonable_mae}
         if not finite:
             return {m: 1.0 / len(maes) for m in maes}
 
@@ -468,7 +517,14 @@ class DivePredict:
 
         inv = {m: 1.0 / (v + eps) for m, v in finite.items()}
         total = sum(inv.values())
-        return {m: inv.get(m, 0.0) / total for m in maes}
+        normalized = {m: inv.get(m, 0.0) / total for m in maes}
+
+        # Clip extreme weights and renormalize
+        clipped = {m: min(max(w, 0.0), 0.5) for m, w in normalized.items()}
+        clip_total = sum(clipped.values())
+        if clip_total > 0:
+            return {m: w / clip_total for m, w in clipped.items()}
+        return {m: 1.0 / len(maes) for m in maes}
 
     def _get_all_predictions(self, steps: int) -> dict[str, list[float]]:
         n = len(self._data)
@@ -529,19 +585,39 @@ class DivePredict:
         weights = self._inverse_weights(maes)
         preds = self._get_all_predictions(steps)
 
+        # remove clearly unstable models from ensemble
+        stable_preds = {}
+        for model, pred_list in preds.items():
+            if any(not self._is_finite_value(p) for p in pred_list):
+                continue
+            if not self._data:
+                stable_preds[model] = pred_list
+                continue
+            last_val = self._data[-1]
+            max_delta = max(abs(last_val) * 20.0, self.stdev(population=True) * 40.0, 1.0)
+            if any(abs(p - last_val) > max_delta for p in pred_list):
+                continue
+            stable_preds[model] = pred_list
+
+        if not stable_preds:
+            stable_preds = preds
+
         results = []
         for step_idx in range(steps):
             weighted_sum = 0.0
             weight_total = 0.0
-            for model, pred_list in preds.items():
+            for model, pred_list in stable_preds.items():
                 if step_idx < len(pred_list):
                     w = weights.get(model, 0.0)
                     weighted_sum += w * pred_list[step_idx]
                     weight_total += w
             if weight_total > 0:
-                results.append(weighted_sum / weight_total)
+                candidate = weighted_sum / weight_total
             else:
-                results.append(self._data[-1] if self._data else 0.0)
+                candidate = self._data[-1] if self._data else 0.0
+
+            results.append(self._bound_prediction(candidate))
+
         return results
 
     # Function Mapping Discovery

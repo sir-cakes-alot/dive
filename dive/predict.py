@@ -444,14 +444,36 @@ class DivePredict(DiveTransforms):
 
         return best_period
 
+    def _predict_power_law(self, steps: int) -> list[float] | None:
+        """y = a * x^b trend prediction."""
+        n = len(self._data)
+        if n < 3:
+            return None
+        # shifted indices to avoid log(0)
+        xs = [float(i + 1) for i in range(n)]
+        ys = self._data
+        if any(y <= 0 for y in ys):
+            return None
+
+        log_x = [math.log(x) for x in xs]
+        log_y = [math.log(y) for y in ys]
+
+        params = self._fit_linear_xy(log_x, log_y)
+        if not params:
+            return None
+        b, log_a = params
+        a = math.exp(log_a)
+
+        return [a * ((n + i + 1) ** b) for i in range(steps)]
+
     # Ensemble Prediction Engine
 
     def _backtest(self, k: int) -> dict[str, float]:
         n = len(self._data)
         errors: dict[str, list[float]] = {
             "linear": [], "quadratic": [], "holt": [],
-            "exponential": [], "differences": [], "drift": [],
-            "newton": [], "lagrange": [], "poly_auto": [],
+            "exponential": [], "power_law": [], "differences": [], 
+            "drift": [], "newton": [], "lagrange": [], "poly_auto": [],
             "poly_3": [], "poly_4": [], "poly_5": [],
             "seasonal": [],
         }
@@ -477,6 +499,10 @@ class DivePredict(DiveTransforms):
             pred = self._safe_call(lambda s=sub, sp=split: s._predict_exponential(sp))
             if pred is not None:
                 errors["exponential"].append(abs(pred - actual))
+
+            pred = self._safe_call(lambda s=sub: s._predict_power_law(1))
+            if pred is not None:
+                errors["power_law"].append(abs(pred[0] - actual))
 
             pred = self._safe_call(lambda s=sub: s._predict_seasonal_naive(1)[0])
             if pred is not None:
@@ -550,6 +576,10 @@ class DivePredict(DiveTransforms):
                 exp_preds.append(ep)
         if len(exp_preds) == steps:
             preds["exponential"] = exp_preds
+
+        pw_preds = self._safe_call(lambda s=steps: self._predict_power_law(s))
+        if pw_preds is not None:
+            preds["power_law"] = pw_preds
 
         poly_order = self._detect_polynomial_order()
         deg = poly_order if poly_order is not None else min(3, n - 1)
@@ -790,6 +820,43 @@ class DivePredict(DiveTransforms):
                     a, b = params
                     add_candidate(lambda x: a * math.sqrt(x) + b, f"Square root: {a:.{precision}g} * sqrt(x) + {b:.{precision}g}")
 
+        # === Inverse square root: y = a / sqrt(x) + b ===
+        if time.time() < deadline:
+            valid = [(x, y) for x, y in zip(xs, ys) if x > 0]
+            if len(valid) >= 2:
+                vx, vy = zip(*valid)
+                inv_sqrt_x = [1.0 / math.sqrt(x) for x in vx]
+                params = self._fit_linear_xy(inv_sqrt_x, vy)
+                if params:
+                    a, b = params
+                    add_candidate(lambda x: a / math.sqrt(x) + b, f"Inv. Square root: {a:.{precision}g} / sqrt(x) + {b:.{precision}g}")
+
+        # === Periodic: y = a * sin(b*x + c) + d ===
+        if time.time() < deadline and len(xs) >= 4:
+            # Very simple search for periodic patterns
+            y_range = max(ys) - min(ys)
+            y_mid = (max(ys) + min(ys)) / 2
+            if y_range > 1e-10:
+                # Guess freq based on zero crossings or peaks?
+                # For now, just try a few common periods if TA allows
+                for period in [2, 3, 4, 5, 6, 7, 8, 10, 12, 24, 30]:
+                    if time.time() >= deadline: break
+                    b = 2 * math.pi / period
+                    # Fit a*sin(bx) + c*cos(bx) + d
+                    # This can be done via linear regression on sin(bx), cos(bx), 1
+                    sins = [math.sin(b * x) for x in xs]
+                    coss = [math.cos(b * x) for x in xs]
+                    # use _fit_multilinear helper
+                    m_coeffs = self._fit_multilinear([sins, coss], ys)
+                    if m_coeffs:
+                        d, a_sin, a_cos = m_coeffs
+                        amp = math.sqrt(a_sin**2 + a_cos**2)
+                        phase = math.atan2(a_cos, a_sin)
+                        add_candidate(
+                            lambda x, aa=amp, bb=b, pp=phase, dd=d: aa * math.sin(bb * x + pp) + dd,
+                            f"Periodic: {amp:.{precision}g} * sin({b:.{precision}g}*x + {phase:.{precision}g}) + {d:.{precision}g}"
+                        )
+
         # === Integer coefficient grid search (for exact relationships) ===
         if time.time() < deadline:
             # Simple grid search for y = a*x + b with integer a, b
@@ -799,7 +866,7 @@ class DivePredict(DiveTransforms):
                         continue
                     err = score(lambda x: a * x + b)
                     if err < 0.1:  # very close fit
-                        add_candidate(lambda x, aa=a, bb=b: aa * x + bb, f"Integer linear: {aa}*x + {bb}")
+                        add_candidate(lambda x, aa=a, bb=b: aa * x + bb, f"Integer linear: {a}*x + {b}")
 
         # === Floor/Ceil/Round variants ===
         if time.time() < deadline:
@@ -817,15 +884,15 @@ class DivePredict(DiveTransforms):
                             continue
                         err = score(lambda x, aa=a, bb=b, cc=c: aa * x**2 + bb * x + cc)
                         if err < 0.1:
-                            desc = f"Integer quadratic: {aa}*x^2"
-                            if bb >= 0:
-                                desc += f" + {bb}*x"
+                            desc = f"Integer quadratic: {a}*x^2"
+                            if b >= 0:
+                                desc += f" + {b}*x"
                             else:
-                                desc += f" - {-bb}*x"
-                            if cc >= 0:
-                                desc += f" + {cc}"
+                                desc += f" - {-b}*x"
+                            if c >= 0:
+                                desc += f" + {c}"
                             else:
-                                desc += f" - {-cc}"
+                                desc += f" - {-c}"
                             add_candidate(lambda x, aa=a, bb=b, cc=c: aa * x**2 + bb * x + cc, desc)
 
         # Sort by error
@@ -859,73 +926,174 @@ class DivePredict(DiveTransforms):
 
     # Regression Mode Prediction
 
+    @staticmethod
+    def _fit_multilinear(xs_list: list[list[float]], ys: list[float]) -> list[float] | None:
+        """
+        Fit y = b0 + b1*x1 + b2*x2 + ... + bm*xm.
+        Returns [b0, b1, ..., bm] or None.
+        """
+        n = len(ys)
+        m = len(xs_list)
+        if n < m + 1:
+            return None
+
+        # Construct augmented matrix for normal equations: (X'X)B = X'Y
+        # X is (n x m+1) where first column is all 1s.
+        X = []
+        for i in range(n):
+            row = [1.0]
+            for j in range(m):
+                row.append(xs_list[j][i])
+            X.append(row)
+
+        # XtX = X' * X (size m+1 x m+1)
+        xtx = [[0.0] * (m + 1) for _ in range(m + 1)]
+        for i in range(m + 1):
+            for j in range(m + 1):
+                xtx[i][j] = math.fsum(X[k][i] * X[k][j] for k in range(n))
+
+        # XtY = X' * Y (size m+1 x 1)
+        xty = [0.0] * (m + 1)
+        for i in range(m + 1):
+            xty[i] = math.fsum(X[k][i] * ys[k] for k in range(n))
+
+        # Solve xtx * B = xty using Gaussian elimination
+        aug = [xtx[r][:] + [xty[r]] for r in range(m + 1)]
+        size = m + 1
+        for col in range(size):
+            pivot = max(range(col, size), key=lambda r: abs(aug[r][col]))
+            aug[col], aug[pivot] = aug[pivot], aug[col]
+            if abs(aug[col][col]) < 1e-15:
+                return None
+            for row in range(col + 1, size):
+                factor = aug[row][col] / aug[col][col]
+                for c in range(col, size + 1):
+                    aug[row][c] -= factor * aug[col][c]
+
+        coeffs = [0.0] * size
+        for i in range(size - 1, -1, -1):
+            coeffs[i] = aug[i][size]
+            for j in range(i + 1, size):
+                coeffs[i] -= aug[i][j] * coeffs[j]
+            coeffs[i] /= aug[i][i]
+
+        return coeffs
+
     def _predict_regression(
         self,
-        reference: type(self),
+        references: list[type(self)],
         steps: int,
         TA: float
     ) -> list[float]:
         """
-        Regression mode: reference is longer than self by `steps`.
-        Use reference[0:n] aligned with self[0:n] to learn F(x) → y,
-        then apply F to reference[n:n+steps] to predict self[n:n+steps].
+        Regression mode: references are longer than self by `steps`.
         """
         n = len(self._data)
-        x_history = reference._data[:n]
-        x_future = reference._data[n:n + steps]
         y_history = self._data
-
         deadline = time.time() + TA
 
-        # Phase 1: Discover mappings (60% of time)
-        phase1_end = time.time() + TA * 0.6
-        mappings = self._discover_mappings(x_history, y_history, phase1_end, precision=4)
+        all_preds = []
+        weights = []
 
-        if not mappings:
-            return self._predict_correlation_fallback(reference, steps)
+        # 1. Individual reference mappings
+        for ref in references:
+            x_history = ref._data[:n]
+            x_future = ref._data[n:n + steps]
+            
+            # Use a slice of TA for each reference if there are many
+            ref_ta = TA / (len(references) + 1)
+            phase1_end = time.time() + ref_ta * 0.8
+            mappings = self._discover_mappings(x_history, y_history, phase1_end, precision=4)
+            
+            if mappings:
+                holdout = min(2, n // 4)
+                validated = []
+                for func, fit_err, desc in mappings:
+                    val_err = self._forward_validate(func, x_history, y_history, holdout)
+                    if val_err < float("inf"):
+                        validated.append((func, val_err))
+                
+                if validated:
+                    validated.sort(key=lambda t: t[1])
+                    best_func, best_err = validated[0]
+                    ref_preds = [best_func(x) for x in x_future]
+                    if all(math.isfinite(p) for p in ref_preds):
+                        all_preds.append(ref_preds)
+                        weights.append(1.0 / (best_err + 1e-6))
 
-        # Phase 2: Forward validation (20% of time)
-        holdout = min(2, n // 4)
-        validated: list[tuple[Callable, float, float, str]] = []
+        # 2. Multi-variate linear regression
+        if len(references) > 1 and n > len(references):
+            xs_histories = [ref._data[:n] for ref in references]
+            m_coeffs = self._fit_multilinear(xs_histories, y_history)
+            if m_coeffs:
+                # Validate multilinear
+                holdout = min(2, n // 4)
+                m_errors = []
+                for i in range(n - holdout, n):
+                    pred = m_coeffs[0] + sum(m_coeffs[j+1] * xs_histories[j][i] for j in range(len(references)))
+                    m_errors.append(abs(pred - y_history[i]))
+                
+                m_mae = math.fsum(m_errors) / len(m_errors) if m_errors else float("inf")
+                
+                if m_mae < float("inf"):
+                    xs_futures = [ref._data[n:n + steps] for ref in references]
+                    m_preds = []
+                    for s in range(steps):
+                        p = m_coeffs[0] + sum(m_coeffs[j+1] * xs_futures[j][s] for j in range(len(references)))
+                        m_preds.append(p)
+                    
+                    all_preds.append(m_preds)
+                    weights.append(1.0 / (m_mae + 1e-6))
 
-        for func, fit_err, desc in mappings:
-            val_err = self._forward_validate(func, x_history, y_history, holdout)
-            if val_err < float("inf"):
-                validated.append((func, fit_err, val_err, desc))
+        if not all_preds:
+            # Fallback: average individual correlation fallbacks
+            fallbacks = [self._predict_correlation_fallback(ref, steps) for ref in references]
+            return [sum(f[i] for f in fallbacks) / len(fallbacks) for i in range(steps)]
 
-        validated.sort(key=lambda t: t[2])
+        # Weighted ensemble of regression models
+        final_results = []
+        total_weight = sum(weights)
+        for s in range(steps):
+            w_sum = sum(all_preds[i][s] * weights[i] for i in range(len(weights)))
+            final_results.append(w_sum / total_weight)
+            
+        return final_results
 
-        # Phase 4: Generate predictions
-        if not validated:
-            return self._predict_correlation_fallback(reference, steps)
+    def _predict_with_correlation(
+        self,
+        references: list[type(self)],
+        steps: int,
+        corr_threshold: float
+    ) -> list[float]:
+        """
+        Correlation mode: references have same length as self.
+        """
+        n = len(self._data)
+        base_pred = self._time_series_predict(steps)
 
-        # Use best function or weighted ensemble of top functions
-        best_funcs = validated[:3]  # Top 3 functions
-        
-        # Check if best is clearly dominant
-        if len(best_funcs) >= 1 and best_funcs[0][2] < 0.01:
-            func = best_funcs[0][0]
-            return [func(x) for x in x_future]
+        all_adjustments = []
+        for reference in references:
+            ref_pred = reference._ensemble_predict(steps)
+            try:
+                corr = self.correlation(reference)
+            except:
+                corr = 0.0
 
-        # Weighted ensemble of top functions
+            if abs(corr) >= corr_threshold:
+                self_std = self.stdev() if n >= 2 else 1.0
+                ref_std = reference.stdev() if n >= 2 else 1.0
+                if ref_std > 1e-10:
+                    ref_mean = reference.mean()
+                    adj = [(rp - ref_mean) * (self_std / ref_std) * corr * 0.5 for rp in ref_pred]
+                    all_adjustments.append(adj)
+
+        if not all_adjustments:
+            return base_pred
+
         results = []
-        for x in x_future:
-            preds = []
-            weights = []
-            for func, fit_err, val_err, _ in best_funcs:
-                try:
-                    pred = func(x)
-                    if math.isfinite(pred):
-                        preds.append(pred)
-                        weights.append(1.0 / (val_err + 1e-6))
-                except:
-                    pass
-            if preds:
-                total_weight = sum(weights)
-                weighted_pred = sum(p * w for p, w in zip(preds, weights)) / total_weight
-                results.append(weighted_pred)
-            else:
-                results.append(self._data[-1])
+        for s in range(steps):
+            avg_adj = sum(a[s] for a in all_adjustments) / len(all_adjustments)
+            results.append(base_pred[s] + avg_adj)
         return results
 
     def _predict_correlation_fallback(self, reference: type(self), steps: int) -> list[float]:
@@ -957,50 +1125,6 @@ class DivePredict(DiveTransforms):
         adjustments = [
             (x - ref_mean) * (self_std / ref_std) * corr
             for x in ref_future
-        ]
-
-        return [bp + adj for bp, adj in zip(base_pred, adjustments)]
-
-    # Correlation Mode Prediction
-
-    def _predict_with_correlation(
-        self,
-        reference: type(self),
-        steps: int,
-        corr_threshold: float
-    ) -> list[float]:
-        """
-        Correlation mode: reference has same length as self.
-        Use correlation to adjust time-series predictions.
-        """
-        n = len(self._data)
-
-        # Get base prediction from time-series methods
-        base_pred = self._time_series_predict(steps)
-
-        # Get reference's prediction
-        ref_pred = reference._ensemble_predict(steps)
-
-        # Compute correlation
-        try:
-            corr = self.correlation(reference)
-        except Exception:
-            corr = 0.0
-
-        if abs(corr) < corr_threshold:
-            return base_pred
-
-        # Adjust based on correlation
-        self_std = self.stdev() if n >= 2 else 1.0
-        ref_std = reference.stdev() if n >= 2 else 1.0
-
-        if ref_std < 1e-10:
-            return base_pred
-
-        ref_mean = reference.mean()
-        adjustments = [
-            (rp - ref_mean) * (self_std / ref_std) * corr * 0.5
-            for rp in ref_pred
         ]
 
         return [bp + adj for bp, adj in zip(base_pred, adjustments)]
@@ -1068,7 +1192,7 @@ class DivePredict(DiveTransforms):
         steps: int = 1,
         *,
         method: str = "ensemble",
-        reference: type(self) | None = None,
+        reference: type(self) | list[type(self)] | None = None,
         corr_threshold: float = 0.1,
         TA: float = 0,
     ) -> float | list[float]:
@@ -1084,12 +1208,12 @@ class DivePredict(DiveTransforms):
             - "ensemble" (default): weighted combination of all models
             - "linear", "quadratic", "holt", "exponential", "differences",
               "drift", "newton", "lagrange"
-        reference : Dive | None
-            Optional reference series for enhanced prediction.
-            - If len(reference) == len(self) + steps: **Regression mode**
+        reference : Dive | list[Dive] | None
+            Optional reference series (one or more) for enhanced prediction.
+            - If len(ref) == len(self) + steps: **Regression mode**
               Uses reference as predictor variable. The extra elements in
               reference are known future values used to predict self.
-            - If len(reference) == len(self): **Correlation mode**
+            - If len(ref) == len(self): **Correlation mode**
               Adjusts predictions based on correlation between series.
         corr_threshold : float
             Minimum correlation for reference adjustment (default 0.1).
@@ -1107,26 +1231,39 @@ class DivePredict(DiveTransforms):
         Examples
         --------
         >>> sales = Dive([100, 150, 120, 200, 180])
-        >>> temps = Dive([20, 25, 22, 30, 28, 35])  # reference has steps=1 extra values
+        >>> temps = Dive([20, 25, 22, 30, 28, 35])
         >>> sales.predict_next(reference=temps, TA=1)
-        220.5  # predicted sales for temperature 35
+        220.5
+        >>> # Multiple references
+        >>> humidity = Dive([60, 65, 62, 70, 68, 75])
+        >>> sales.predict_next(reference=[temps, humidity], TA=1)
+        218.2
         """
         self._require(2)
         n = len(self._data)
 
-        # Determine mode based on reference length
-        if reference is not None:
-            ref_len = len(reference._data)
-            if ref_len == n + steps:
+        # Normalize reference to list[Dive]
+        if reference is None:
+            refs = []
+        elif isinstance(reference, list):
+            refs = reference
+        else:
+            refs = [reference]
+
+        if refs:
+            # Check all references for consistent mode
+            ref_lens = [len(r._data) for r in refs]
+            if all(rl == n + steps for rl in ref_lens):
                 # Regression mode
-                preds = self._predict_regression(reference, steps, TA)
-            elif ref_len == n:
+                preds = self._predict_regression(refs, steps, TA)
+            elif all(rl == n for rl in ref_lens):
                 # Correlation mode
-                preds = self._predict_with_correlation(reference, steps, corr_threshold)
+                preds = self._predict_with_correlation(refs, steps, corr_threshold)
             else:
+                # Mixed or invalid lengths
                 raise ValueError(
-                    f"Reference length {ref_len} incompatible with self length {n} "
-                    f"and steps {steps}. Expected {n + steps} (regression) or {n} (correlation)."
+                    f"References have incompatible lengths: {ref_lens}. "
+                    f"Expected all to be {n + steps} (regression) or {n} (correlation)."
                 )
         else:
             # NO REFERENCE: pure time-series prediction
@@ -1165,7 +1302,7 @@ class DivePredict(DiveTransforms):
         else:
             raise ValueError(f"Unknown method '{method}'")
 
-    def predict_detail(self, steps: int = 1, reference: type(self) | None = None, TA: float = 0) -> dict:
+    def predict_detail(self, steps: int = 1, reference: type(self) | list[type(self)] | None = None, TA: float = 0) -> dict:
         """
         Return detailed prediction information from all models.
 
@@ -1173,7 +1310,7 @@ class DivePredict(DiveTransforms):
         ----------
         steps : int
             Number of future values to predict.
-        reference : Dive | None
+        reference : Dive | list[Dive] | None
             Optional reference series (see predict_next for modes).
         TA : float
             Time allotment for deep analysis.
@@ -1214,13 +1351,17 @@ class DivePredict(DiveTransforms):
 
         # Add function mappings if reference provided
         if reference is not None and TA > 0:
-            n = len(self._data)
-            x_history = reference._data[:n]
-            y_history = self._data
-            deadline = time.time() + TA
-            mappings = self._discover_mappings(x_history, y_history, deadline, precision=4)
-            result["function_mappings"] = [
-                {"function": desc, "fit_error": err} for _, err, desc in mappings[:10]
-            ]
+            refs = reference if isinstance(reference, list) else [reference]
+            result["function_mappings"] = []
+            for i, ref in enumerate(refs):
+                n = len(self._data)
+                x_history = ref._data[:n]
+                y_history = self._data
+                deadline = time.time() + (TA / len(refs))
+                mappings = self._discover_mappings(x_history, y_history, deadline, precision=4)
+                result["function_mappings"].append({
+                    "reference_index": i,
+                    "mappings": [{"function": desc, "fit_error": err} for _, err, desc in mappings[:10]]
+                })
 
         return result

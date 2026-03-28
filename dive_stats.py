@@ -102,5 +102,4 @@ class DiveStats:
         s = self.stdev(population=True)
         if s == 0:
             return 0.0
-        return math.fsum(((x - m) / s) ** 4 for x in self._data) / n - 3.0</content>
-<parameter name="filePath">dive_stats.py
+        return math.fsum(((x - m) / s) ** 4 for x in self._data) / n - 3.0

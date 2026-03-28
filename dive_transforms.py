@@ -178,5 +178,4 @@ class DiveTransforms:
 
         r_sq = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
-        return intercept, slope, r_sq</content>
-<parameter name="filePath">dive_transforms.py
+        return intercept, slope, r_sq

@@ -5,7 +5,7 @@ DIVE Core — Basic data container and management.
 from __future__ import annotations
 
 import math
-from typing import Iterable, Iterator, Union
+from typing import Iterable, Iterator, Union, Any
 
 Numeric = Union[int, float]
 
@@ -166,5 +166,4 @@ class DiveCore:
                 return default
             return result
         except Exception:
-            return default</content>
-<parameter name="filePath">dive_core.py
+            return default

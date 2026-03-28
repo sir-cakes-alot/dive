@@ -115,5 +115,4 @@ class DiveViz:
         lines.append(f"  min: {lo:.4g}")
         lines.append(f"  └{'─' * width}┘")
         lines.append(f"   0{' ' * (width - 5)}{n - 1}")
-        return "\n".join(lines)</content>
-<parameter name="filePath">dive_viz.py
+        return "\n".join(lines)

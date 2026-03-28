@@ -27,5 +27,4 @@ class DiveExport:
         if n >= 2:
             d["stdev"] = self.stdev()
             d["variance"] = self.variance()
-        return d</content>
-<parameter name="filePath">dive_export.py
+        return d

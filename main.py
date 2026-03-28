@@ -25,16 +25,5 @@ class Dive(DiveCore, DiveStats, DivePredict, DiveViz, DiveExport, DiveTransforms
     """Ordered numeric container with built-in statistics, prediction and viz."""
     __slots__ = ()
 
-    # A simple wrapper class: detailed behavior is in the mixins.
+    # Behavior is defined in mixins; this class is the public API.
     pass
-
-
-if __name__ == "__main__":
-    # Simple sanity tests
-    d = Dive([3, 1, 4, 1, 5, 9, 2, 6])
-    print("mean", d.mean())
-    print("median", d.median())
-    print("sum", d.sum())
-    d += 7
-    print("predict_next", d.predict_next())
-    print(d.summary())
